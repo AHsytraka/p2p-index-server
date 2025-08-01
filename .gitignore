@@ -57,3 +57,6 @@ dist/
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
+
+# data test
+app/data/

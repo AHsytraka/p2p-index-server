@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from app.core.upload_config import *
 
 class Settings(BaseSettings):
   PROJECT_NAME: str = "default"
@@ -6,5 +7,5 @@ class Settings(BaseSettings):
 
   class Config:
     env_file = ".env"
-
+    
 settings = Settings()
