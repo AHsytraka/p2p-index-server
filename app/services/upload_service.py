@@ -2,11 +2,15 @@ from fastapi import Depends,APIRouter, UploadFile, File, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from pathlib import Path
-from app.core.config import UPLOAD_DIR, DANGEROUS_CONTENT_TYPES  
+from app.core.config import UPLOAD_DIR, DANGEROUS_CONTENT_TYPES, TORRENT_DIR  
 from posixpath import basename
 from app.models.data_mapping import DataMapping
+from app.utils.splitter_util import split_file
+from app.utils.hash_util import hash_pieces
+from app.core.config import settings
 import uuid
 import shutil
+import json
 
 
 class UploadService:
@@ -14,8 +18,10 @@ class UploadService:
     def __init__(self, db: Session = Depends(get_db)):
         self.db = db
 
-        # Création du dossier d'upload s'il n'existe pas encore
+        # Création les dossiers s'ils n'existent pas encore
+
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        TORRENT_DIR.mkdir(parents=True, exist_ok=True)
     
     async def upload_file(self, file: UploadFile = File(...)):
         """
@@ -25,11 +31,34 @@ class UploadService:
         self.validate_file(file)
         _uuid = self.save_file(file)      
 
+        # Construction du chemin complet vers le fichier sauvegardé
+        unique_name = self.gen_unique_name(file, _uuid)
+        file_path = UPLOAD_DIR / unique_name
+
+        # 1. Découpage
+        pieces = split_file(str(file_path))  # retourne list[bytes]
+
+        # 2. Calcul des hash
+        hashes = hash_pieces(pieces)
+
+        # 3. Génération des métadonnées
+        metadata = self.generate_metadata(
+            file_name=file.filename,
+            file_size=file_path.stat().st_size,
+            piece_size=1048576,  
+            piece_hashes=hashes,
+            tracker_url=settings.TRACKER_URL
+        )
+
+        # 4. Sauvegarde du fichier .torrent
+        torrent_path = self.save_metadata_file(metadata)
+
         return {
             "message": "Fichier reçu avec succès",
-            "filename": file.filename, 
-            "uuid": _uuid 
-            }
+            "filename": file.filename,
+            "uuid": str(_uuid),
+            "torrent_file": torrent_path.name  # nom du fichier .torrent généré
+        }
 
     def validate_file(self, file: UploadFile):
         """
@@ -110,3 +139,29 @@ class UploadService:
 
         self.db.add(new_file)
         self.db.commit()
+    
+    def generate_metadata(self, file_name: str,file_size: int, piece_size: int,piece_hashes: list[str],tracker_url: str) -> dict:
+        """
+        Génère les métadonnées au format .torrent-like.
+        """
+        return {
+            "file_name": file_name,
+            "file_size": file_size,
+            "piece_size": piece_size,
+            "num_pieces": len(piece_hashes),
+            "piece_hashes": piece_hashes,
+            "tracker_url": tracker_url
+        }
+    
+    def save_metadata_file(self, metadata: dict, output_dir: Path = TORRENT_DIR) -> Path:
+        """
+        Sauvegarde les métadonnées dans un fichier .torrent.
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_name = metadata["file_name"] + ".torrent"
+        file_path = output_dir / file_name
+
+        with open(file_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        return file_path

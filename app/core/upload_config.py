@@ -1,6 +1,7 @@
 from pathlib import Path
 
 UPLOAD_DIR = Path("app/data/uploads")
+TORRENT_DIR = Path("app/data/torrents")
 
 DANGEROUS_CONTENT_TYPES = [
     "application/x-msdownload",     # .exe
