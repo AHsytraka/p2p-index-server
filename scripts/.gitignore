@@ -1,0 +1,5 @@
+# Scripts directory
+# Utility scripts for the P2P system
+__pycache__/
+*.pyc
+*.log

@@ -1,0 +1,7 @@
+# Test files
+# Add specific test files to ignore if needed
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/

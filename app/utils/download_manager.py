@@ -1,0 +1,163 @@
+import threading
+import time
+import struct
+from typing import Dict, List, Optional
+from app.utils.p2p_protocol import P2PProtocol, MessageType
+from app.utils.piece_manager import PieceManager
+from app.utils.file_manager import FileManager
+
+class DownloadManager:
+    """Manages file downloads from multiple peers"""
+    
+    def __init__(self, torrent_info: Dict, output_path: str):
+        self.torrent_info = torrent_info
+        self.output_path = output_path
+        self.info_hash = torrent_info['info_hash']
+        
+        # Calculate total pieces correctly - pieces is a hex string, each hash is 40 hex chars (20 bytes)
+        pieces_hex = torrent_info['info']['pieces']
+        self.total_pieces = len(pieces_hex) // 40  # Each SHA-1 hash is 40 hex characters
+        
+        self.piece_manager = PieceManager(self.total_pieces)
+        self.peer_connections: Dict[str, P2PProtocol] = {}
+        self.downloaded_pieces: Dict[int, bytes] = {}
+        
+        self.download_speed = 0.0
+        self.upload_speed = 0.0
+        self.is_downloading = False
+        self.download_thread: Optional[threading.Thread] = None
+        
+        self.lock = threading.Lock()
+        
+    def add_peer(self, peer_id: str, ip: str, port: int) -> bool:
+        """Add a peer to download from"""
+        try:
+            protocol = P2PProtocol(peer_id, self.info_hash)
+            
+            if protocol.connect_to_peer(ip, port):
+                with self.lock:
+                    self.peer_connections[f"{ip}:{port}"] = protocol
+                
+                # Send interested message
+                protocol.send_message(MessageType.INTERESTED)
+                return True
+            return False
+            
+        except Exception as e:
+            print(f"Failed to add peer {ip}:{port}: {e}")
+            return False
+    
+    def start_download(self) -> None:
+        """Start the download process"""
+        if self.is_downloading:
+            return
+        
+        self.is_downloading = True
+        self.download_thread = threading.Thread(target=self._download_loop)
+        self.download_thread.start()
+    
+    def stop_download(self) -> None:
+        """Stop the download process"""
+        self.is_downloading = False
+        
+        if self.download_thread:
+            self.download_thread.join()
+        
+        # Disconnect from all peers
+        with self.lock:
+            for protocol in self.peer_connections.values():
+                protocol.disconnect()
+            self.peer_connections.clear()
+    
+    def _download_loop(self) -> None:
+        """Main download loop"""
+        while self.is_downloading and not self.piece_manager.is_complete():
+            # Request pieces from available peers
+            self._request_pieces()
+            
+            # Handle incoming messages
+            self._handle_peer_messages()
+            
+            # Update download statistics
+            self._update_statistics()
+            
+            time.sleep(0.1)  # Small delay to prevent busy waiting
+        
+        if self.piece_manager.is_complete():
+            self._reconstruct_file()
+    
+    def _request_pieces(self) -> None:
+        """Request pieces from peers"""
+        with self.lock:
+            for peer_addr, protocol in self.peer_connections.items():
+                piece_index = self.piece_manager.get_next_piece_to_request()
+                
+                if piece_index >= 0:
+                    self.piece_manager.mark_piece_requested(piece_index)
+                    
+                    # Create piece request (simplified - in real BitTorrent this includes begin/length)
+                    request_payload = struct.pack('!I', piece_index)
+                    protocol.send_message(MessageType.REQUEST, request_payload)
+    
+    def _handle_peer_messages(self) -> None:
+        """Handle messages from peers"""
+        with self.lock:
+            for peer_addr, protocol in list(self.peer_connections.items()):
+                message = protocol.receive_message()
+                
+                if message is None:
+                    # Connection lost
+                    protocol.disconnect()
+                    del self.peer_connections[peer_addr]
+                    continue
+                
+                if message['type'] == MessageType.PIECE:
+                    self._handle_piece_message(message['payload'])
+                elif message['type'] == MessageType.HAVE:
+                    piece_index = struct.unpack('!I', message['payload'])[0]
+                    self.piece_manager.update_peer_pieces(peer_addr, [piece_index])
+    
+    def _handle_piece_message(self, payload: bytes) -> None:
+        """Handle received piece data"""
+        if len(payload) < 4:
+            return
+        
+        piece_index = struct.unpack('!I', payload[0:4])[0]
+        piece_data = payload[4:]
+        
+        # Verify piece integrity (simplified)
+        expected_piece_length = self.torrent_info['info']['piece length']
+        if len(piece_data) <= expected_piece_length:
+            self.downloaded_pieces[piece_index] = piece_data
+            self.piece_manager.mark_piece_completed(piece_index)
+    
+    def _update_statistics(self) -> None:
+        """Update download statistics"""
+        # This would calculate actual speeds based on data transfer
+        # For now, just placeholder values
+        self.download_speed = len(self.downloaded_pieces) * 1024  # Simplified
+    
+    def _reconstruct_file(self) -> None:
+        """Reconstruct the complete file from pieces"""
+        ordered_pieces = []
+        
+        for i in range(self.total_pieces):
+            if i in self.downloaded_pieces:
+                ordered_pieces.append(self.downloaded_pieces[i])
+            else:
+                print(f"Missing piece {i}")
+                return
+        
+        FileManager.reconstruct_file(ordered_pieces, self.output_path)
+        print(f"File download completed: {self.output_path}")
+    
+    def get_progress(self) -> Dict:
+        """Get download progress information"""
+        return {
+            'completion_percentage': self.piece_manager.get_completion_percentage(),
+            'downloaded_pieces': len(self.piece_manager.completed_pieces),
+            'total_pieces': self.total_pieces,
+            'connected_peers': len(self.peer_connections),
+            'download_speed': self.download_speed,
+            'upload_speed': self.upload_speed
+        }

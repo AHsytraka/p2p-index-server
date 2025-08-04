@@ -1,59 +1,110 @@
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
 
-# Virtual environment
+# Virtual environments
 .venv/
 env/
 venv/
+ENV/
+env.bak/
+venv.bak/
 
 # Environment variables
 .env
 .env.*
+.env.local
+.env.production
 
-# SQLite DBs
-*.db
-*.sqlite3
-
-# Test and coverage artifacts
-.coverage
-coverage.xml
-htmlcov/
-.pytest_cache/
+# Python package management
+pip-log.txt
+pip-delete-this-directory.txt
 .tox/
+.coverage
+.coverage.*
+.cache
 nosetests.xml
-test-results/
-
-# MyPy, Pylint, and other reports
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
 .mypy_cache/
 .dmypy.json
 .pyre/
 .pytype/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Database files
+*.db
+*.sqlite3
+*.sqlite
+p2p.db
+
+# Project specific files
+uploads/
+downloads/
+torrents/
+*.torrent
+
+# Test files (keep test_ prefix files for development)
+# Uncomment to ignore test files:
+# test_*.py
+# *_test.py
+
+# Logs
+*.log
+logs/
 
 # IDEs and editors
 .vscode/
 .idea/
 *.sublime-project
 *.sublime-workspace
+*.swp
+*.swo
+*~
 
-# macOS / Linux / Windows system files
+# OS files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Logs
-*.log
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-
-# FastAPI CLI
+# FastAPI specific
 .fastapi/
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
+
+# Documentation
+docs/_build/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/

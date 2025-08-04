@@ -1,0 +1,12 @@
+Hello, this is a test file for the P2P torrent system!
+This file will be used to test the upload functionality.
+
+Date: August 4, 2025
+Purpose: Testing torrent creation and upload
+
+The system should:
+1. Upload this file
+2. Create a torrent metadata
+3. Store in database
+4. Generate .torrent file
+5. Allow download of .torrent file
