@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import atexit
 from app.api import tracker
+from app.api import upload
 from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
