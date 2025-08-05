@@ -13,6 +13,8 @@ from app.schemas.peer import PeerResponse, PeerListResponse
 from app.schemas.user import UserCreate, UserResponse
 from app.utils.torrent_generator import TorrentGenerator
 from app.utils.file_manager import FileManager
+from app.utils.bittorrent import BitTorrentUtils
+from app.services.auto_seeder_service import auto_seeder_manager
 
 router = APIRouter()
 
@@ -23,6 +25,7 @@ def get_tracker_service(db: Session = Depends(get_db)):
 # Torrent management endpoints
 @router.post("/upload", response_model=TorrentResponse)
 async def upload_file_and_create_torrent(
+    request: Request,
     file: UploadFile = File(...),
     tracker_service: TrackerService = Depends(get_tracker_service)
 ):
@@ -88,6 +91,41 @@ async def upload_file_and_create_torrent(
             # Save the .torrent file in the torrents directory
             torrent_filename = os.path.join(torrent_dir, f"{os.path.splitext(safe_filename)[0]}.torrent")
             TorrentGenerator.save_torrent_file(torrent_data, torrent_filename)
+            
+            # Automatically start P2P seeder server for this file
+            try:
+                auto_seeder_manager.add_seeder(torrent_filename, uploaded_file_path)
+                print(f"🚀 Auto-started P2P seeder for {safe_filename}")
+            except Exception as seeder_error:
+                print(f"Warning: Failed to auto-start seeder: {seeder_error}")
+            
+            # Automatically register the uploader as a seeder
+            try:
+                client_ip = request.client.host
+                if client_ip == "127.0.0.1" or client_ip == "localhost":
+                    # For local development, try to get real IP from headers
+                    client_ip = request.headers.get("x-forwarded-for", "127.0.0.1")
+                    if "," in client_ip:
+                        client_ip = client_ip.split(",")[0].strip()
+                
+                # Create announce request for the uploader (as completed seeder)
+                uploader_announce = TorrentAnnounceRequest(
+                    info_hash=torrent_data['info_hash'],
+                    peer_id=BitTorrentUtils.generate_peer_id(),  # Generate a peer ID for the uploader
+                    port=6881,  # Default BitTorrent port
+                    uploaded=torrent_data['info']['length'],  # They have uploaded the full file
+                    downloaded=torrent_data['info']['length'],  # They have the complete file
+                    left=0,  # Nothing left to download
+                    event="completed",  # They completed the download (seeding)
+                    compact=0
+                )
+                
+                # Register the uploader as a peer/seeder
+                tracker_service.announce(uploader_announce, client_ip)
+                
+            except Exception as peer_reg_error:
+                # Don't fail the upload if peer registration fails, just log it
+                print(f"Warning: Failed to register uploader as peer: {peer_reg_error}")
             
             return result
             
@@ -219,6 +257,52 @@ def get_peers(
     """Get active peers for a torrent"""
     return tracker_service.get_peers(info_hash)
 
+@router.post("/torrents/{info_hash}/seed")
+def register_as_seeder(
+    info_hash: str,
+    request: Request,
+    tracker_service: TrackerService = Depends(get_tracker_service)
+):
+    """Register the current client as a seeder for an existing torrent"""
+    try:
+        # Get torrent info
+        torrent = tracker_service.get_torrent(info_hash)
+        if not torrent:
+            raise HTTPException(status_code=404, detail="Torrent not found")
+        
+        client_ip = request.client.host
+        if client_ip == "127.0.0.1" or client_ip == "localhost":
+            # For local development, try to get real IP from headers
+            client_ip = request.headers.get("x-forwarded-for", "127.0.0.1")
+            if "," in client_ip:
+                client_ip = client_ip.split(",")[0].strip()
+        
+        # Create announce request as a completed seeder
+        seeder_announce = TorrentAnnounceRequest(
+            info_hash=info_hash,
+            peer_id=BitTorrentUtils.generate_peer_id(),
+            port=6881,
+            uploaded=torrent.file_size,  # Full file uploaded
+            downloaded=torrent.file_size,  # Full file downloaded
+            left=0,  # Nothing left to download
+            event="completed",
+            compact=0
+        )
+        
+        # Register as peer/seeder
+        result = tracker_service.announce(seeder_announce, client_ip)
+        
+        return {
+            "message": f"Successfully registered as seeder for {torrent.name}",
+            "info_hash": info_hash,
+            "peer_count": len(tracker_service.get_peers(info_hash))
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to register as seeder: {str(e)}")
+
 # User management endpoints
 @router.post("/users", response_model=UserResponse)
 def create_user(
@@ -245,4 +329,54 @@ def get_tracker_stats(
     tracker_service: TrackerService = Depends(get_tracker_service)
 ):
     """Get tracker statistics"""
-    return tracker_service.get_tracker_stats()
+    stats = tracker_service.get_tracker_stats()
+    
+    # Add seeder info
+    seeder_info = auto_seeder_manager.get_seeder_info()
+    stats['active_seeders'] = len(seeder_info)
+    stats['seeder_ports'] = [s['port'] for s in seeder_info]
+    
+    return stats
+
+@router.get("/seeders")
+def get_active_seeders():
+    """Get information about active P2P seeder servers"""
+    return {
+        "active_seeders": auto_seeder_manager.get_seeder_info(),
+        "count": len(auto_seeder_manager.seeders)
+    }
+
+@router.post("/seeders/stop/{info_hash}")
+def stop_seeder(info_hash: str):
+    """Stop a specific seeder by info hash"""
+    if info_hash in auto_seeder_manager.seeders:
+        try:
+            auto_seeder_manager.seeders[info_hash]['server'].stop_server()
+            del auto_seeder_manager.seeders[info_hash]
+            return {"message": f"Stopped seeder for {info_hash}"}
+        except Exception as e:
+            return {"error": f"Failed to stop seeder: {e}"}
+    else:
+        return {"error": "Seeder not found"}
+
+@router.post("/peers/cleanup")
+def cleanup_localhost_peers(
+    tracker_service: TrackerService = Depends(get_tracker_service)
+):
+    """Remove all localhost (127.0.0.1) peers to avoid duplicate registrations"""
+    try:
+        count = tracker_service.cleanup_localhost_peers()
+        return {"message": f"Removed {count} localhost peers"}
+    except Exception as e:
+        return {"error": f"Failed to cleanup peers: {e}"}
+
+@router.post("/peers/deduplicate")
+def deduplicate_peers(
+    tracker_service: TrackerService = Depends(get_tracker_service)
+):
+    """Remove duplicate peers (same IP:port for same torrent)"""
+    try:
+        count = tracker_service.deduplicate_peers()
+        return {"message": f"Removed {count} duplicate peers"}
+    except Exception as e:
+        return {"error": f"Failed to deduplicate peers: {e}"}

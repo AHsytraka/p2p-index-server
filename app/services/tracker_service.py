@@ -213,3 +213,50 @@ class TrackerService:
             'active_peers': active_peers,
             'total_users': total_users
         }
+    
+    def cleanup_localhost_peers(self) -> int:
+        """Remove all localhost (127.0.0.1) peers"""
+        count = self.db.query(Peer).filter(Peer.ip_address == "127.0.0.1").count()
+        self.db.query(Peer).filter(Peer.ip_address == "127.0.0.1").delete()
+        self.db.commit()
+        return count
+    
+    def deduplicate_peers(self) -> int:
+        """Remove duplicate peers (same IP:port for same torrent, keep the most recent)"""
+        # Get all peers grouped by IP, port, and torrent
+        from sqlalchemy import func
+        
+        subquery = self.db.query(
+            Peer.ip_address,
+            Peer.port,
+            Peer.torrent_id,
+            func.max(Peer.last_announce).label('max_announce')
+        ).group_by(
+            Peer.ip_address,
+            Peer.port,
+            Peer.torrent_id
+        ).subquery()
+        
+        # Get peers to keep (most recent for each IP:port:torrent combination)
+        peers_to_keep = self.db.query(Peer.id).join(
+            subquery,
+            and_(
+                Peer.ip_address == subquery.c.ip_address,
+                Peer.port == subquery.c.port,
+                Peer.torrent_id == subquery.c.torrent_id,
+                Peer.last_announce == subquery.c.max_announce
+            )
+        ).all()
+        
+        keep_ids = [p.id for p in peers_to_keep]
+        
+        # Count duplicates to be removed
+        if keep_ids:
+            count = self.db.query(Peer).filter(~Peer.id.in_(keep_ids)).count()
+            # Remove duplicates
+            self.db.query(Peer).filter(~Peer.id.in_(keep_ids)).delete(synchronize_session=False)
+        else:
+            count = 0
+            
+        self.db.commit()
+        return count

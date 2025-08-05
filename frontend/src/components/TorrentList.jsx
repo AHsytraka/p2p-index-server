@@ -1,5 +1,6 @@
 import React from 'react';
 import { File, Download, Users, Calendar, HardDrive } from 'lucide-react';
+import api from '../services/api';
 
 export const TorrentList = ({ torrents, onTorrentSelect, selectedTorrent }) => {
   const formatFileSize = (bytes) => {
@@ -23,20 +24,19 @@ export const TorrentList = ({ torrents, onTorrentSelect, selectedTorrent }) => {
   const downloadTorrentFile = async (torrent, event) => {
     event.stopPropagation(); // Prevent torrent selection when clicking download
     try {
-      const response = await fetch(`http://localhost:8000/api/tracker/torrents/${torrent.info_hash}/download`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${torrent.name.split('.')[0]}.torrent`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-      } else {
-        alert('Failed to download torrent file');
-      }
+      const response = await api.get(`/api/tracker/torrents/${torrent.info_hash}/download`, {
+        responseType: 'blob'
+      });
+      
+      const blob = response.data;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${torrent.name.split('.')[0]}.torrent`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error downloading torrent file:', error);
       alert('Error downloading torrent file');

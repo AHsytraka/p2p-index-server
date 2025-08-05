@@ -32,14 +32,22 @@ class DownloadManager:
     def add_peer(self, peer_id: str, ip: str, port: int) -> bool:
         """Add a peer to download from"""
         try:
+            peer_key = f"{ip}:{port}"
+            
+            # Check if we already have a connection to this peer
+            if peer_key in self.peer_connections:
+                print(f"Already connected to peer {peer_key}")
+                return True
+            
             protocol = P2PProtocol(peer_id, self.info_hash)
             
             if protocol.connect_to_peer(ip, port):
                 with self.lock:
-                    self.peer_connections[f"{ip}:{port}"] = protocol
+                    self.peer_connections[peer_key] = protocol
                 
                 # Send interested message
                 protocol.send_message(MessageType.INTERESTED)
+                print(f"✅ Connected to peer {peer_key}")
                 return True
             return False
             
@@ -95,27 +103,62 @@ class DownloadManager:
                 if piece_index >= 0:
                     self.piece_manager.mark_piece_requested(piece_index)
                     
-                    # Create piece request (simplified - in real BitTorrent this includes begin/length)
-                    request_payload = struct.pack('!I', piece_index)
-                    protocol.send_message(MessageType.REQUEST, request_payload)
+                    # Create proper REQUEST message: piece_index, begin (offset), length
+                    piece_length = self.torrent_info['info']['piece length']
+                    begin = 0  # Start from beginning of piece
+                    length = min(piece_length, 16384)  # Request in 16KB chunks max
+                    
+                    request_payload = struct.pack('!III', piece_index, begin, length)
+                    if protocol.send_message(MessageType.REQUEST, request_payload):
+                        print(f"📤 Requested piece {piece_index} (offset {begin}, length {length}) from {peer_addr}")
+                    else:
+                        print(f"❌ Failed to send request to {peer_addr}")
+                        # Mark piece as not requested if send failed
+                        self.piece_manager.mark_piece_not_requested(piece_index)
     
     def _handle_peer_messages(self) -> None:
         """Handle messages from peers"""
         with self.lock:
             for peer_addr, protocol in list(self.peer_connections.items()):
-                message = protocol.receive_message()
-                
-                if message is None:
-                    # Connection lost
-                    protocol.disconnect()
-                    del self.peer_connections[peer_addr]
+                try:
+                    message = protocol.receive_message()
+                    
+                    if message is None:
+                        continue  # Timeout or no message, keep connection
+                    
+                    message_type = message.get('type')
+                    
+                    if message_type == MessageType.PIECE:
+                        self._handle_piece_message(message['payload'])
+                    elif message_type == MessageType.HAVE:
+                        piece_index = struct.unpack('!I', message['payload'])[0]
+                        self.piece_manager.update_peer_pieces(peer_addr, [piece_index])
+                    elif message_type == MessageType.BITFIELD:
+                        self._handle_bitfield_message(peer_addr, message['payload'])
+                    elif message_type == MessageType.UNCHOKE:
+                        print(f"Peer {peer_addr} unchoked us")
+                    elif message_type == 'keep_alive':
+                        # Send keep alive back
+                        protocol.send_message(MessageType.KEEP_ALIVE)
+                        
+                except Exception as e:
+                    print(f"Error handling message from {peer_addr}: {e}")
+                    # Don't disconnect on every error, just skip this iteration
                     continue
-                
-                if message['type'] == MessageType.PIECE:
-                    self._handle_piece_message(message['payload'])
-                elif message['type'] == MessageType.HAVE:
-                    piece_index = struct.unpack('!I', message['payload'])[0]
-                    self.piece_manager.update_peer_pieces(peer_addr, [piece_index])
+                    
+    def _handle_bitfield_message(self, peer_addr: str, payload: bytes) -> None:
+        """Handle bitfield message showing which pieces peer has"""
+        available_pieces = []
+        for byte_index, byte_val in enumerate(payload):
+            for bit_index in range(8):
+                piece_index = byte_index * 8 + bit_index
+                if piece_index >= self.total_pieces:
+                    break
+                if byte_val & (1 << (7 - bit_index)):
+                    available_pieces.append(piece_index)
+        
+        self.piece_manager.update_peer_pieces(peer_addr, available_pieces)
+        print(f"Peer {peer_addr} has {len(available_pieces)} pieces available")
     
     def _handle_piece_message(self, payload: bytes) -> None:
         """Handle received piece data"""

@@ -16,6 +16,7 @@ class MessageType(IntEnum):
     REQUEST = 7
     PIECE = 8
     CANCEL = 9
+    KEEP_ALIVE = 255  # Special value for keep-alive messages
 
 class P2PProtocol:
     """Handles P2P communication protocol between peers"""
@@ -94,7 +95,7 @@ class P2PProtocol:
         """Connect to a peer"""
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(30)  # 30 second timeout
+            self.socket.settimeout(10)  # Reduced timeout for initial connection
             self.socket.connect((ip, port))
             
             # Send handshake
@@ -110,6 +111,9 @@ class P2PProtocol:
                 raise ValueError("Info hash mismatch")
             
             self.connected_peer_id = handshake_data['peer_id']
+            
+            # Set timeout for message operations
+            self.socket.settimeout(5.0)  # 5 second timeout for messages
             return True
             
         except Exception as e:
@@ -139,8 +143,8 @@ class P2PProtocol:
         
         try:
             # Receive message length first
-            length_data = self.socket.recv(4)
-            if len(length_data) != 4:
+            length_data = self._recv_exact(4)
+            if not length_data:
                 return None
             
             length = struct.unpack('!I', length_data)[0]
@@ -149,16 +153,34 @@ class P2PProtocol:
                 return {'type': 'keep_alive', 'payload': b''}
             
             # Receive the rest of the message
-            message_data = self.socket.recv(length)
-            if len(message_data) != length:
+            message_data = self._recv_exact(length)
+            if not message_data:
                 return None
             
             full_message = length_data + message_data
             return self.parse_message(full_message)
             
+        except socket.timeout:
+            print("Failed to receive message: timed out")
+            return None
         except Exception as e:
             print(f"Failed to receive message: {e}")
             return None
+    
+    def _recv_exact(self, size: int) -> Optional[bytes]:
+        """Receive exact number of bytes from socket"""
+        data = b''
+        while len(data) < size:
+            try:
+                chunk = self.socket.recv(size - len(data))
+                if not chunk:
+                    return None  # Connection closed
+                data += chunk
+            except socket.timeout:
+                return None
+            except Exception:
+                return None
+        return data
     
     def disconnect(self):
         """Disconnect from peer"""

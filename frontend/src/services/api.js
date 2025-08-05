@@ -1,7 +1,11 @@
 import axios from 'axios';
 
+const baseURL = 'http://192.168.175.242:8000';
+
+console.log('API Base URL:', baseURL); // Debug log
+
 const api = axios.create({
-  baseURL: process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000',
+  baseURL: baseURL,
   timeout: 30000,
 });
 

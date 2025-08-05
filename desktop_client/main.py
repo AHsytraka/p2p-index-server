@@ -28,7 +28,7 @@ class P2PDesktopClient:
         self.root.geometry("800x600")
         
         # Configuration
-        self.tracker_url = "http://localhost:8000"
+        self.tracker_url = "http://192.168.175.242:8000"
         self.download_directory = os.path.join(os.getcwd(), "downloads")
         os.makedirs(self.download_directory, exist_ok=True)
         
@@ -305,9 +305,10 @@ class P2PDesktopClient:
                 
             except Exception as e:
                 error_msg = f"❌ Error: {str(e)}"
+                status_msg = f"Error: {str(e)}"
                 self.root.after(0, lambda: self.upload_result.delete(1.0, tk.END))
                 self.root.after(0, lambda: self.upload_result.insert(tk.END, error_msg))
-                self.root.after(0, lambda: self.set_status(f"Error: {str(e)}"))
+                self.root.after(0, lambda: self.set_status(status_msg))
             finally:
                 self.root.after(0, lambda: self.upload_progress.stop())
         
@@ -377,7 +378,16 @@ class P2PDesktopClient:
                     
                     # Add peers (limit to first 3 for stability)
                     connected_peers = 0
-                    for peer in peers[:3]:
+                    unique_peers = {}
+                    
+                    # Deduplicate peers by IP:port to avoid multiple connections to same seeder
+                    for peer in peers:
+                        peer_key = f"{peer['ip_address']}:{peer['port']}"
+                        if peer_key not in unique_peers:
+                            unique_peers[peer_key] = peer
+                    
+                    # Connect to unique peers only
+                    for peer_key, peer in list(unique_peers.items())[:3]:  # Limit to 3 peers
                         if download_manager.add_peer(peer['peer_id'], peer['ip_address'], peer['port']):
                             connected_peers += 1
                     
@@ -397,9 +407,11 @@ class P2PDesktopClient:
                     self._monitor_download(download_id)
                     
                 except Exception as e:
-                    self.downloads[download_id]['status'] = f'Error: {str(e)}'
+                    error_status = f'Error: {str(e)}'
+                    download_error_msg = f"Download error: {str(e)}"
+                    self.downloads[download_id]['status'] = error_status
                     self.root.after(0, lambda: self.update_download_status(download_id))
-                    self.root.after(0, lambda: self.set_status(f"Download error: {str(e)}"))
+                    self.root.after(0, lambda: self.set_status(download_error_msg))
             
             threading.Thread(target=download_thread, daemon=True).start()
             
@@ -504,7 +516,8 @@ class P2PDesktopClient:
                 else:
                     self.root.after(0, lambda: self.set_status("Failed to fetch torrents"))
             except Exception as e:
-                self.root.after(0, lambda: self.set_status(f"Connection error: {str(e)}"))
+                error_msg = f"Connection error: {str(e)}"
+                self.root.after(0, lambda: self.set_status(error_msg))
         
         threading.Thread(target=fetch_thread, daemon=True).start()
     

@@ -25,6 +25,12 @@ class PieceManager:
             if piece_index not in self.completed_pieces:
                 self.requested_pieces.add(piece_index)
     
+    def mark_piece_not_requested(self, piece_index: int) -> None:
+        """Mark a piece as no longer being requested (e.g., if request failed)"""
+        with self.lock:
+            if piece_index in self.requested_pieces:
+                self.requested_pieces.remove(piece_index)
+    
     def get_next_piece_to_request(self) -> int:
         """Get the next piece to request (rarest first strategy)"""
         with self.lock:

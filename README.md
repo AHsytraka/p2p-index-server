@@ -36,7 +36,7 @@ pip install -r requirements.txt
 
 ```powershell
 # Start the tracker server
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 # Server will be available at:
 # - API: http://127.0.0.1:8000
