@@ -12,6 +12,7 @@ import os
 import sys
 import json
 import requests
+import socket
 from pathlib import Path
 
 # Add parent directory to path to import our modules
@@ -474,8 +475,17 @@ class P2PDesktopClient:
             if response.status_code == 200:
                 return response.json()
             
-            # If no peers endpoint, try announce
-            peer_id = BitTorrentUtils.generate_peer_id()
+            # If no peers endpoint, try announce with consistent peer ID
+            # Get local IP for consistent peer ID
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+            except:
+                local_ip = "127.0.0.1"
+            
+            peer_id = BitTorrentUtils.generate_peer_id("P2PD", info_hash, local_ip)  # D for Downloader
             announce_params = {
                 'info_hash': info_hash,
                 'peer_id': peer_id,

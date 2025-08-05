@@ -134,11 +134,8 @@ class AutoSeederManager:
                 
                 local_ip = get_local_ip()
                 
-                # Use a consistent peer ID based on info_hash and port to avoid duplicates
-                import hashlib
-                peer_id_seed = f"SEEDER_{info_hash}_{port}_{local_ip}"
-                peer_id_hash = hashlib.md5(peer_id_seed.encode()).hexdigest()[:16]
-                peer_id = f"P2PS{peer_id_hash}"  # Consistent seeder peer ID (20 chars)
+                # Use consistent peer ID generation (same as other components)
+                peer_id = BitTorrentUtils.generate_peer_id("P2PS", info_hash, local_ip)
                 
                 file_size = torrent_data['info']['length']
                 

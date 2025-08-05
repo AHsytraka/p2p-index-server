@@ -32,7 +32,18 @@ class P2PSeederServer:
         # Load torrent data
         self.torrent_data = TorrentGenerator.load_torrent_file(torrent_file_path)
         self.info_hash = self.torrent_data['info_hash']
-        self.peer_id = BitTorrentUtils.generate_peer_id()
+        
+        # Get local IP for consistent peer ID
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except:
+            local_ip = "127.0.0.1"
+        
+        # Generate consistent peer ID based on IP and info hash
+        self.peer_id = BitTorrentUtils.generate_peer_id("P2PS", self.info_hash, local_ip)
         
         # Load file pieces
         self.file_pieces = self._load_file_pieces()

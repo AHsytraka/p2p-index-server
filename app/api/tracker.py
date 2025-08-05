@@ -109,9 +109,12 @@ async def upload_file_and_create_torrent(
                         client_ip = client_ip.split(",")[0].strip()
                 
                 # Create announce request for the uploader (as completed seeder)
+                # Generate consistent peer ID for uploader as seeder
+                uploader_peer_id = BitTorrentUtils.generate_peer_id("P2PS", torrent_data['info_hash'], client_ip)
+                
                 uploader_announce = TorrentAnnounceRequest(
                     info_hash=torrent_data['info_hash'],
-                    peer_id=BitTorrentUtils.generate_peer_id(),  # Generate a peer ID for the uploader
+                    peer_id=uploader_peer_id,  # Use consistent peer ID for uploader
                     port=6881,  # Default BitTorrent port
                     uploaded=torrent_data['info']['length'],  # They have uploaded the full file
                     downloaded=torrent_data['info']['length'],  # They have the complete file
