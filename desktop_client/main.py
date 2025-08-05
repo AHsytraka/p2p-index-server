@@ -118,6 +118,24 @@ class P2PDesktopClient:
         downloads_frame = ttk.LabelFrame(download_frame, text="Active Downloads", padding=10)
         downloads_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
+        # Control buttons frame
+        controls_frame = ttk.Frame(downloads_frame)
+        controls_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.pause_btn = ttk.Button(controls_frame, text="⏸️ Pause", command=self.pause_download)
+        self.pause_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.resume_btn = ttk.Button(controls_frame, text="▶️ Resume", command=self.resume_download)
+        self.resume_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.stop_btn = ttk.Button(controls_frame, text="⏹️ Stop", command=self.stop_download)
+        self.stop_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Initially disable control buttons
+        self.pause_btn.config(state="disabled")
+        self.resume_btn.config(state="disabled")
+        self.stop_btn.config(state="disabled")
+        
         # Downloads treeview
         columns = ("File", "Progress", "Speed", "Status")
         self.downloads_tree = ttk.Treeview(downloads_frame, columns=columns, show="headings", height=8)
@@ -131,6 +149,9 @@ class P2PDesktopClient:
         
         self.downloads_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         downloads_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Bind selection event for downloads
+        self.downloads_tree.bind('<<TreeviewSelect>>', self.on_download_select)
     
     def create_torrents_tab(self):
         """Create the torrents list tab"""
@@ -458,13 +479,15 @@ class P2PDesktopClient:
             download_info = self.downloads[download_id]
             download_manager = download_info['download_manager']
             
-            while download_info['status'] == 'Downloading':
+            while download_info['status'] in ['Downloading', 'Paused']:
                 try:
                     progress = download_manager.get_progress()
+                    current_status = download_manager.get_download_status()
                     
                     # Update download info
                     download_info['progress'] = progress['completion_percentage']
                     download_info['speed'] = progress['download_speed']
+                    download_info['status'] = current_status
                     
                     # Update UI
                     self.root.after(0, lambda: self.update_download_status(download_id))
@@ -474,6 +497,10 @@ class P2PDesktopClient:
                         download_info['status'] = 'Completed'
                         self.root.after(0, lambda: self.update_download_status(download_id))
                         self.root.after(0, lambda: self.set_status(f"Download completed: {download_info['name']}"))
+                        break
+                    
+                    # Check if stopped
+                    if current_status == 'Stopped':
                         break
                     
                     time.sleep(1)  # Update every second
@@ -621,6 +648,114 @@ class P2PDesktopClient:
         self.refresh_torrents()
         self.update_status()
         self.root.after(10000, self.auto_refresh)  # 10 seconds
+    
+    def on_download_select(self, event):
+        """Handle download selection"""
+        selection = self.downloads_tree.selection()
+        if selection:
+            # Enable control buttons when a download is selected
+            self.pause_btn.config(state="normal")
+            self.resume_btn.config(state="normal")
+            self.stop_btn.config(state="normal")
+        else:
+            # Disable control buttons when no download is selected
+            self.pause_btn.config(state="disabled")
+            self.resume_btn.config(state="disabled")
+            self.stop_btn.config(state="disabled")
+    
+    def pause_download(self):
+        """Pause the selected download"""
+        selection = self.downloads_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a download to pause.")
+            return
+        
+        try:
+            item = selection[0]
+            # Get download ID from the tree item
+            download_id = None
+            for did, download_info in self.downloads.items():
+                # Find matching download by checking tree item values
+                item_values = self.downloads_tree.item(item)['values']
+                if item_values and download_info['filename'] == item_values[0]:
+                    download_id = did
+                    break
+            
+            if download_id and download_id in self.downloads:
+                download_manager = self.downloads[download_id]['download_manager']
+                if download_manager and download_manager.pause_download():
+                    self.set_status(f"Paused download: {self.downloads[download_id]['filename']}")
+                else:
+                    messagebox.showwarning("Cannot Pause", "Unable to pause this download.")
+        except Exception as e:
+            error_msg = str(e)
+            messagebox.showerror("Error", f"Failed to pause download: {error_msg}")
+    
+    def resume_download(self):
+        """Resume the selected download"""
+        selection = self.downloads_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a download to resume.")
+            return
+        
+        try:
+            item = selection[0]
+            # Get download ID from the tree item
+            download_id = None
+            for did, download_info in self.downloads.items():
+                # Find matching download by checking tree item values
+                item_values = self.downloads_tree.item(item)['values']
+                if item_values and download_info['filename'] == item_values[0]:
+                    download_id = did
+                    break
+            
+            if download_id and download_id in self.downloads:
+                download_manager = self.downloads[download_id]['download_manager']
+                if download_manager and download_manager.resume_download():
+                    self.set_status(f"Resumed download: {self.downloads[download_id]['filename']}")
+                else:
+                    messagebox.showwarning("Cannot Resume", "Unable to resume this download.")
+        except Exception as e:
+            error_msg = str(e)
+            messagebox.showerror("Error", f"Failed to resume download: {error_msg}")
+    
+    def stop_download(self):
+        """Stop the selected download"""
+        selection = self.downloads_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a download to stop.")
+            return
+        
+        try:
+            item = selection[0]
+            # Get download ID from the tree item
+            download_id = None
+            for did, download_info in self.downloads.items():
+                # Find matching download by checking tree item values
+                item_values = self.downloads_tree.item(item)['values']
+                if item_values and download_info['filename'] == item_values[0]:
+                    download_id = did
+                    break
+            
+            if download_id and download_id in self.downloads:
+                filename = self.downloads[download_id]['filename']
+                result = messagebox.askyesno("Confirm Stop", 
+                                           f"Are you sure you want to stop downloading '{filename}'?")
+                if result:
+                    download_manager = self.downloads[download_id]['download_manager']
+                    if download_manager:
+                        download_manager.stop_download()
+                    
+                    # Remove from downloads list
+                    del self.downloads[download_id]
+                    
+                    # Remove from tree
+                    self.downloads_tree.delete(item)
+                    
+                    self.set_status(f"Stopped download: {filename}")
+        except Exception as e:
+            error_msg = str(e)
+            messagebox.showerror("Error", f"Failed to stop download: {error_msg}")
 
 def main():
     root = tk.Tk()

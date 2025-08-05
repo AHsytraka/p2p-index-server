@@ -25,6 +25,7 @@ class DownloadManager:
         self.download_speed = 0.0
         self.upload_speed = 0.0
         self.is_downloading = False
+        self.is_paused = False
         self.download_thread: Optional[threading.Thread] = None
         
         self.lock = threading.Lock()
@@ -80,6 +81,11 @@ class DownloadManager:
     def _download_loop(self) -> None:
         """Main download loop"""
         while self.is_downloading and not self.piece_manager.is_complete():
+            # Check if paused
+            if self.is_paused:
+                time.sleep(0.5)  # Sleep longer when paused
+                continue
+                
             # Request pieces from available peers
             self._request_pieces()
             
@@ -204,3 +210,55 @@ class DownloadManager:
             'download_speed': self.download_speed,
             'upload_speed': self.upload_speed
         }
+    
+    def pause_download(self) -> bool:
+        """Pause the download"""
+        with self.lock:
+            if self.is_downloading and not self.is_paused:
+                self.is_paused = True
+                print("📴 Download paused")
+                return True
+            return False
+    
+    def resume_download(self) -> bool:
+        """Resume the download"""
+        with self.lock:
+            if self.is_downloading and self.is_paused:
+                self.is_paused = False
+                print("▶️ Download resumed")
+                return True
+            return False
+    
+    def is_download_paused(self) -> bool:
+        """Check if download is paused"""
+        return self.is_paused
+    
+    def get_download_status(self) -> str:
+        """Get current download status"""
+        if not self.is_downloading:
+            return "Stopped"
+        elif self.is_paused:
+            return "Paused"
+        elif self.piece_manager.is_complete():
+            return "Completed"
+        else:
+            return "Downloading"
+    
+    def stop_download(self) -> bool:
+        """Stop the download completely"""
+        with self.lock:
+            if self.is_downloading:
+                self.is_downloading = False
+                self.is_paused = False
+                
+                # Close all peer connections
+                for peer_addr, protocol in self.peer_connections.items():
+                    try:
+                        protocol.disconnect()
+                    except Exception as e:
+                        print(f"Error disconnecting from {peer_addr}: {e}")
+                
+                self.peer_connections.clear()
+                print("🛑 Download stopped")
+                return True
+            return False
