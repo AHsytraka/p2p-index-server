@@ -672,21 +672,21 @@ class P2PDesktopClient:
         
         try:
             item = selection[0]
-            # Get download ID from the tree item
-            download_id = None
-            for did, download_info in self.downloads.items():
-                # Find matching download by checking tree item values
-                item_values = self.downloads_tree.item(item)['values']
-                if item_values and download_info['filename'] == item_values[0]:
-                    download_id = did
-                    break
+            # Get download ID directly from tree item ID
+            try:
+                download_id = int(item)
+            except ValueError:
+                messagebox.showerror("Error", "Invalid download selection.")
+                return
             
-            if download_id and download_id in self.downloads:
+            if download_id in self.downloads:
                 download_manager = self.downloads[download_id]['download_manager']
                 if download_manager and download_manager.pause_download():
-                    self.set_status(f"Paused download: {self.downloads[download_id]['filename']}")
+                    self.set_status(f"Paused download: {self.downloads[download_id]['name']}")
                 else:
                     messagebox.showwarning("Cannot Pause", "Unable to pause this download.")
+            else:
+                messagebox.showerror("Error", "Download not found.")
         except Exception as e:
             error_msg = str(e)
             messagebox.showerror("Error", f"Failed to pause download: {error_msg}")
@@ -700,21 +700,21 @@ class P2PDesktopClient:
         
         try:
             item = selection[0]
-            # Get download ID from the tree item
-            download_id = None
-            for did, download_info in self.downloads.items():
-                # Find matching download by checking tree item values
-                item_values = self.downloads_tree.item(item)['values']
-                if item_values and download_info['filename'] == item_values[0]:
-                    download_id = did
-                    break
+            # Get download ID directly from tree item ID
+            try:
+                download_id = int(item)
+            except ValueError:
+                messagebox.showerror("Error", "Invalid download selection.")
+                return
             
-            if download_id and download_id in self.downloads:
+            if download_id in self.downloads:
                 download_manager = self.downloads[download_id]['download_manager']
                 if download_manager and download_manager.resume_download():
-                    self.set_status(f"Resumed download: {self.downloads[download_id]['filename']}")
+                    self.set_status(f"Resumed download: {self.downloads[download_id]['name']}")
                 else:
                     messagebox.showwarning("Cannot Resume", "Unable to resume this download.")
+            else:
+                messagebox.showerror("Error", "Download not found.")
         except Exception as e:
             error_msg = str(e)
             messagebox.showerror("Error", f"Failed to resume download: {error_msg}")
@@ -728,17 +728,15 @@ class P2PDesktopClient:
         
         try:
             item = selection[0]
-            # Get download ID from the tree item
-            download_id = None
-            for did, download_info in self.downloads.items():
-                # Find matching download by checking tree item values
-                item_values = self.downloads_tree.item(item)['values']
-                if item_values and download_info['filename'] == item_values[0]:
-                    download_id = did
-                    break
+            # Get download ID directly from tree item ID
+            try:
+                download_id = int(item)
+            except ValueError:
+                messagebox.showerror("Error", "Invalid download selection.")
+                return
             
-            if download_id and download_id in self.downloads:
-                filename = self.downloads[download_id]['filename']
+            if download_id in self.downloads:
+                filename = self.downloads[download_id]['name']
                 result = messagebox.askyesno("Confirm Stop", 
                                            f"Are you sure you want to stop downloading '{filename}'?")
                 if result:
@@ -753,6 +751,8 @@ class P2PDesktopClient:
                     self.downloads_tree.delete(item)
                     
                     self.set_status(f"Stopped download: {filename}")
+            else:
+                messagebox.showerror("Error", "Download not found.")
         except Exception as e:
             error_msg = str(e)
             messagebox.showerror("Error", f"Failed to stop download: {error_msg}")

@@ -20,7 +20,8 @@ class DownloadManager:
         
         self.piece_manager = PieceManager(self.total_pieces)
         self.peer_connections: Dict[str, P2PProtocol] = {}
-        self.downloaded_pieces: Dict[int, bytes] = {}
+        self.downloaded_pieces: Dict[int, bytearray] = {}
+        self.piece_chunks: Dict[int, Dict[int, bool]] = {}  # Track chunks for each piece
         
         self.download_speed = 0.0
         self.upload_speed = 0.0
@@ -109,14 +110,22 @@ class DownloadManager:
                 if piece_index >= 0:
                     self.piece_manager.mark_piece_requested(piece_index)
                     
-                    # Create proper REQUEST message: piece_index, begin (offset), length
+                    # Request the entire piece (simplified approach)
                     piece_length = self.torrent_info['info']['piece length']
+                    
+                    # For the last piece, it might be smaller
+                    if piece_index == self.total_pieces - 1:
+                        file_size = self.torrent_info['info']['length']
+                        last_piece_size = file_size % piece_length
+                        if last_piece_size > 0:
+                            piece_length = last_piece_size
+                    
                     begin = 0  # Start from beginning of piece
-                    length = min(piece_length, 16384)  # Request in 16KB chunks max
+                    length = piece_length  # Request entire piece at once
                     
                     request_payload = struct.pack('!III', piece_index, begin, length)
                     if protocol.send_message(MessageType.REQUEST, request_payload):
-                        print(f"📤 Requested piece {piece_index} (offset {begin}, length {length}) from {peer_addr}")
+                        print(f"📤 Requested entire piece {piece_index} (offset {begin}, length {length}) from {peer_addr}")
                     else:
                         print(f"❌ Failed to send request to {peer_addr}")
                         # Mark piece as not requested if send failed
@@ -168,17 +177,24 @@ class DownloadManager:
     
     def _handle_piece_message(self, payload: bytes) -> None:
         """Handle received piece data"""
-        if len(payload) < 4:
+        if len(payload) < 8:  # Need at least piece_index (4) + offset (4)
             return
         
+        # Parse PIECE message: piece_index, offset, chunk_data
         piece_index = struct.unpack('!I', payload[0:4])[0]
-        piece_data = payload[4:]
+        offset = struct.unpack('!I', payload[4:8])[0]
+        chunk_data = payload[8:]
         
-        # Verify piece integrity (simplified)
-        expected_piece_length = self.torrent_info['info']['piece length']
-        if len(piece_data) <= expected_piece_length:
-            self.downloaded_pieces[piece_index] = piece_data
+        print(f"📥 Received piece {piece_index}, offset {offset}, length {len(chunk_data)}")
+        
+        # Since we're requesting entire pieces, offset should be 0
+        if offset == 0:
+            # Store the entire piece
+            self.downloaded_pieces[piece_index] = bytearray(chunk_data)
             self.piece_manager.mark_piece_completed(piece_index)
+            print(f"✅ Piece {piece_index} completed ({len(chunk_data)} bytes)")
+        else:
+            print(f"❌ Unexpected offset {offset} for piece {piece_index} (expected 0)")
     
     def _update_statistics(self) -> None:
         """Update download statistics"""
@@ -192,7 +208,11 @@ class DownloadManager:
         
         for i in range(self.total_pieces):
             if i in self.downloaded_pieces:
-                ordered_pieces.append(self.downloaded_pieces[i])
+                piece_data = self.downloaded_pieces[i]
+                # Convert bytearray to bytes if needed
+                if isinstance(piece_data, bytearray):
+                    piece_data = bytes(piece_data)
+                ordered_pieces.append(piece_data)
             else:
                 print(f"Missing piece {i}")
                 return
