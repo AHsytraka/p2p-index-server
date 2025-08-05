@@ -29,12 +29,35 @@ class FileManager:
     def reconstruct_file(chunks: List[bytes], output_path: str) -> bool:
         """Reconstruct file from chunks"""
         try:
+            # Create directory if it doesn't exist and path has a directory part
+            dir_path = os.path.dirname(output_path)
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
+            
+            print(f"📝 Writing file to: {output_path}")
+            print(f"📏 Total chunks: {len(chunks)}")
+            total_size = sum(len(chunk) for chunk in chunks)
+            print(f"📐 Total size: {total_size} bytes")
+            
             with open(output_path, 'wb') as f:
-                for chunk in chunks:
+                for i, chunk in enumerate(chunks):
                     f.write(chunk)
-            return True
+                    if i % 100 == 0:  # Log progress every 100 chunks
+                        print(f"📝 Written chunk {i}/{len(chunks)}")
+            
+            # Verify file was created
+            if os.path.exists(output_path):
+                actual_size = os.path.getsize(output_path)
+                print(f"✅ File created successfully: {output_path}")
+                print(f"📐 Final file size: {actual_size} bytes")
+                return True
+            else:
+                print(f"❌ File was not created: {output_path}")
+                return False
+                
         except Exception as e:
-            print(f"Error reconstructing file: {e}")
+            print(f"❌ Error reconstructing file: {e}")
+            print(f"📂 Attempted path: {output_path}")
             return False
     
     @staticmethod

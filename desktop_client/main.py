@@ -238,6 +238,10 @@ class P2PDesktopClient:
         browse_dir_btn = ttk.Button(settings_frame, text="Browse", command=self.browse_download_dir)
         browse_dir_btn.grid(row=1, column=2, padx=(10, 0), pady=(10, 0))
         
+        # Save settings button
+        save_settings_btn = ttk.Button(settings_frame, text="Save Settings", command=self.save_settings)
+        save_settings_btn.grid(row=2, column=1, sticky=tk.W, pady=(10, 0))
+        
         self.update_status()
     
     def browse_file(self):
@@ -264,6 +268,23 @@ class P2PDesktopClient:
         if directory:
             self.download_dir_var.set(directory)
             self.download_directory = directory
+    
+    def save_settings(self):
+        """Save current settings"""
+        # Update tracker URL
+        new_tracker_url = self.tracker_url_var.get().strip()
+        if new_tracker_url and new_tracker_url != self.tracker_url:
+            self.tracker_url = new_tracker_url
+            self.set_status("Tracker URL updated")
+        
+        # Update download directory
+        new_download_dir = self.download_dir_var.get().strip()
+        if new_download_dir and new_download_dir != self.download_directory:
+            self.download_directory = new_download_dir
+            os.makedirs(self.download_directory, exist_ok=True)
+            self.set_status("Download directory updated")
+        
+        messagebox.showinfo("Settings Saved", "Settings have been updated successfully!")
     
     def create_torrent(self):
         """Create torrent from selected file"""
@@ -358,8 +379,12 @@ class P2PDesktopClient:
                     messagebox.showwarning("Already Downloading", f"{torrent_name} is already being downloaded")
                     return
             
-            # Create download directory
+            # Create download path - save file directly in download directory
+            # Use the actual filename from torrent, not the torrent name as a directory
             download_path = os.path.join(self.download_directory, torrent_name)
+            
+            # Ensure download directory exists
+            os.makedirs(self.download_directory, exist_ok=True)
             
             # Add to downloads list
             download_id = len(self.downloads)
@@ -393,8 +418,8 @@ class P2PDesktopClient:
                     
                     self.root.after(0, lambda: self.set_status(f"Found {len(peers)} peers, starting download..."))
                     
-                    # Create download manager
-                    download_manager = DownloadManager(torrent_data, download_path)
+                    # Create download manager with tracker URL
+                    download_manager = DownloadManager(torrent_data, download_path, self.tracker_url)
                     self.downloads[download_id]['download_manager'] = download_manager
                     
                     # Add peers (limit to first 3 for stability)

@@ -1,6 +1,10 @@
 import threading
 import time
 import struct
+import requests
+import hashlib
+import socket
+import os
 from typing import Dict, List, Optional
 from app.utils.p2p_protocol import P2PProtocol, MessageType
 from app.utils.piece_manager import PieceManager
@@ -9,9 +13,10 @@ from app.utils.file_manager import FileManager
 class DownloadManager:
     """Manages file downloads from multiple peers"""
     
-    def __init__(self, torrent_info: Dict, output_path: str):
+    def __init__(self, torrent_info: Dict, output_path: str, tracker_url: str = "http://localhost:8000"):
         self.torrent_info = torrent_info
         self.output_path = output_path
+        self.tracker_url = tracker_url
         self.info_hash = torrent_info['info_hash']
         
         # Calculate total pieces correctly - pieces is a hex string, each hash is 40 hex chars (20 bytes)
@@ -219,6 +224,104 @@ class DownloadManager:
         
         FileManager.reconstruct_file(ordered_pieces, self.output_path)
         print(f"File download completed: {self.output_path}")
+        
+        # Auto-start seeding the completed file
+        self._start_auto_seeding()
+    
+    def _start_auto_seeding(self):
+        """Start seeding the downloaded file automatically"""
+        try:
+            # Get local IP
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+            except:
+                local_ip = "127.0.0.1"
+            
+            # Generate consistent peer ID for this download
+            info_hash = self.torrent_info['info_hash']
+            peer_id_hash = hashlib.md5(f"DOWNLOADER_{info_hash}_{local_ip}".encode()).hexdigest()[:16]
+            peer_id = f"P2PD{peer_id_hash}"  # D for Downloader
+            
+            # Find an available port
+            available_port = None
+            for port in range(6884, 6900):
+                try:
+                    test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    test_socket.bind(('', port))
+                    test_socket.close()
+                    available_port = port
+                    break
+                except:
+                    continue
+            
+            if available_port:
+                # Create a temporary torrent file for the downloaded file
+                from app.utils.torrent_generator import TorrentGenerator
+                
+                temp_torrent_path = f"temp_torrent_{info_hash}.torrent"
+                tracker_announce_url = f"{self.tracker_url}/api/tracker/announce"
+                
+                # Create torrent metadata for the downloaded file
+                temp_torrent_data = TorrentGenerator.create_torrent_metadata(
+                    self.output_path, 
+                    tracker_announce_url
+                )
+                
+                # Save temporary torrent file
+                TorrentGenerator.save_torrent_file(temp_torrent_data, temp_torrent_path)
+                
+                # Start P2P seeder using the temporary torrent file
+                from scripts.p2p_seeder_server import P2PSeederServer
+                
+                seeder = P2PSeederServer(temp_torrent_path, self.output_path, available_port)
+                seeder_thread = threading.Thread(target=seeder.start_server, daemon=True)
+                seeder_thread.start()
+                
+                print(f"🌱 Auto-seeding started for {self.output_path} on port {available_port}")
+                
+                # Register with tracker
+                announce_params = {
+                    'info_hash': info_hash,
+                    'peer_id': peer_id,
+                    'port': available_port,
+                    'uploaded': 0,
+                    'downloaded': sum(len(piece) for piece in self.downloaded_pieces.values()),
+                    'left': 0,
+                    'event': 'completed',
+                    'compact': 0,
+                    'ip': local_ip
+                }
+                
+                response = requests.get(f"{self.tracker_url}/api/tracker/announce", 
+                                      params=announce_params, timeout=10)
+                if response.status_code == 200:
+                    print(f"✅ Registered as seeder with tracker")
+                else:
+                    print(f"❌ Failed to register with tracker: {response.status_code}")
+                    
+                # Clean up temporary torrent file after a delay
+                def cleanup_temp_file():
+                    time.sleep(60)  # Wait 1 minute before cleanup
+                    try:
+                        if os.path.exists(temp_torrent_path):
+                            os.remove(temp_torrent_path)
+                            print(f"🗑️ Cleaned up temporary torrent file: {temp_torrent_path}")
+                    except:
+                        pass
+                
+                cleanup_thread = threading.Thread(target=cleanup_temp_file, daemon=True)
+                cleanup_thread.start()
+                
+            else:
+                print(f"❌ No available ports for seeding")
+                
+        except Exception as e:
+            print(f"❌ Error starting auto-seeding: {e}")
+            import traceback
+            traceback.print_exc()
     
     def get_progress(self) -> Dict:
         """Get download progress information"""
